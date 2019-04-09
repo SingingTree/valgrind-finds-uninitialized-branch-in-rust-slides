@@ -1,0 +1,190 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<title>Rust branching based on uninitialized memory</title>
+
+		<link rel="stylesheet" href="css/reset.css">
+		<link rel="stylesheet" href="css/reveal.css">
+		<link rel="stylesheet" href="css/theme/black.css">
+
+		<!-- Theme used for syntax highlighting of code -->
+		<link rel="stylesheet" href="lib/css/monokai.css">
+
+		<!-- Printing and PDF exports -->
+		<script>
+			var link = document.createElement( 'link' );
+			link.rel = 'stylesheet';
+			link.type = 'text/css';
+			link.href = window.location.search.match( /print-pdf/gi ) ? 'css/print/pdf.css' : 'css/print/paper.css';
+			document.getElementsByTagName( 'head' )[0].appendChild( link );
+		</script>
+	</head>
+	<body>
+		<div class="reveal">
+			<div class="slides">
+				<section>
+					<h2>Rust branching based on uninitialised memory</h2>
+				</section>
+
+				<section>
+					<p<>or</p>
+					<h2>Has Valgrind forever robbed me of my sense of fearless memory safety?</h2>
+				</section>
+
+				<section>
+					<h3>Valgrind</h3>
+					<ul>
+						<li>Tool for memory debugging/profiling.</li>
+						<li>Works out of the box now that jemalloc is not the default Rust allocator.</li>
+						<li>Can find issues like "Conditional jump or move depends on uninitialized values in [@ mp4parse::read_stsd]".</li>
+					</ul>
+				</section>
+
+				<section>
+					<h3>mp4parse-rust</h3>
+					<ul>
+						<li>mp4 parsing project.</li>
+						<li>Rust core, with an optional C API.</li>
+						<li>Used by Firefox to parse mp4 metadata.</li>
+					</ul>
+				</section>
+
+				<section>
+						<h3>The code in question</h3>
+						<pre><code class="rust" data-trim data-noescape>
+while let Some(mut b) = iter.next_box()?
+						</code></pre>
+						<pre><code class="rust" data-trim data-noescape>
+fn next_box(&mut self) -> Result&ltOption&ltBMFFBox&ltT&gt&gt&gt {
+	let r = read_box_header(self.src);
+	match r {
+		Ok(h) => Ok(Some(BMFFBox {
+			head: h,
+			content: self.src.take(h.size - h.offset),
+		})),
+		Err(Error::UnexpectedEOF) => Ok(None),
+		Err(e) => Err(e),
+	}
+}
+						</code></pre>
+						<p>Warning is triggered by feeding the program a file that will trigger the Unexpected EoF case.</p>
+				</section>
+
+				<section>
+					<h3>Who are we going to blame?</h3>
+					<ul>
+						<li>mp4parse devs?</li>
+						<li>Rust?</li>
+						<li>Valgrind?</li>
+					</ul>
+				</section>
+
+				<section>
+					<p>How do we fix this? Is this an unsafe scenario that could happen in other Rust code?</p>
+				</section>
+
+				<section>
+					<p>Problem only seems to happen in release with following cargo config:</p>
+					<pre><code class="toml" data-trim data-noescape>
+[profile.release]
+panic = "abort"
+codegen-units = 1
+debug = true # Do not need this, but helps debug
+					</code></pre>
+				</section>
+
+				<section>
+					Can use `--vgdb-error=1` with Valgrid to break on error then attach a debugger and inspect state + disassemble.
+				</section>
+
+				<section>
+						<p>Faulting:</p>
+						<pre><code class="x86asm" data-trim data-noescape>
+CMP        R8B,0x2
+JC         LAB_0011d2f5 <-- Valgrind halts here
+CMP        qword ptr [local_4d8 + RSP],0x3
+JNZ        LAB_0011d2f5
+CMP        qword ptr [local_450 + RSP],0x0
+JZ         LAB_0011d2f5
+						</code></pre>
+						<p>Apparent non-faulting counterpart:</p>
+						<pre><code class="x86asm" data-trim data-noescape>
+CMP        qword ptr [RSP + local_688],0x0
+MOV        R13B,byte ptr [local_519 + RSP]
+JZ         LAB_00113a85
+CMP        R9,0x3
+JNZ        LAB_00113a85
+CMP        BL,0x2
+JC         LAB_00113a85
+						</code></pre>
+				</section>
+
+				<section>
+					<ul>
+						<li>It's difficult to verify when the data is uninitialised in the dissassembly.</li>
+						<li>Problem is related to optimisation.</li>
+						<li>Problem looks like it's related to order of comparisons.</li>
+					</ul>
+				</section>
+
+				<section>
+					<p>Optimisations can be done based on:</p>
+					<p><b>Reading uninitialised memory is safe provided doing so is not observed.</b></p>
+				</section>
+
+				<section>
+					<p>If A is always false when B is uninitialised</p>
+					<pre><code class="c" data-trim data-noescape>
+if(A && B) foo();
+					</code></pre>
+					<p>is equivalent to</p>
+					<pre><code class="c" data-trim data-noescape>
+if(B && A) foo();
+					</code></pre>
+				</section>
+
+				<section>
+					<p>Sadly, this is very hard (impossible?) for Valgrind to detect and know is safe. The problem has been reported to:</p>
+					<ul>
+						<li>Valgrind</li>
+						<li>llvm</li>
+						<li>Rust</li>
+						<li>Mozilla (webrender, mp4parse)</li>
+					</ul>
+				</section>
+
+				<section>
+					<p>This remains an open problem for Valgrind.</p>
+				</section>
+
+				<section>
+					<p>Best approach we have at this time is verify the false positive and suppress the warning.</p>
+					<p><small>Which is kinda unsatisfying, but it is what it is.</small></p>
+				</section>
+
+				<section>
+					<h2>Fin.</h2>
+				</section>
+			</div>
+		</div>
+
+		<script src="js/reveal.js"></script>
+
+		<script>
+			// More info about config & dependencies:
+			// - https://github.com/hakimel/reveal.js#configuration
+			// - https://github.com/hakimel/reveal.js#dependencies
+			Reveal.initialize({
+				dependencies: [
+					{ src: 'plugin/markdown/marked.js' },
+					{ src: 'plugin/markdown/markdown.js' },
+					{ src: 'plugin/notes/notes.js', async: true },
+					{ src: 'plugin/highlight/highlight.js', async: true }
+				]
+			});
+		</script>
+	</body>
+</html>
