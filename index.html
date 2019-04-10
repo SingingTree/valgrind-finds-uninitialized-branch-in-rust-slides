@@ -58,7 +58,7 @@
 while let Some(mut b) = iter.next_box()?
 						</code></pre>
 						<pre><code class="rust" data-trim data-noescape>
-fn next_box(&mut self) -> Result&ltOption&ltBMFFBox&ltT&gt&gt&gt {
+fn next_box(&mut self) -> Result&lt;Option&lt;BMFFBox&lt;T&gt;&gt;&gt; {
 	let r = read_box_header(self.src);
 	match r {
 		Ok(h) => Ok(Some(BMFFBox {
@@ -69,8 +69,27 @@ fn next_box(&mut self) -> Result&ltOption&ltBMFFBox&ltT&gt&gt&gt {
 		Err(e) => Err(e),
 	}
 }
-						</code></pre>
-						<p>Warning is triggered by feeding the program a file that will trigger the Unexpected EoF case.</p>
+					</code></pre>
+					<p>Warning is triggered by feeding the program a file that will trigger the Unexpected EoF case.</p>
+				</section>
+
+				<section>
+					<h3>Warning with debug symbols</h3>
+					<pre><code data-trim data-noescape>
+==7202== Conditional jump or move depends on uninitialised value(s)
+==7202==    at 0x125292: read_audio_sample_entry&lt;mp4parse::BMFFBox&lt;mp4parse::BMFFBox&lt;mp4parse::BMFFBox&lt;mp4parse::BMFFBox&lt;mp4parse::BMFFBox&lt;mp4parse::BMFFBox&lt;std::fs::File&gt;&gt;&gt;&gt;&gt;&gt;&gt; (lib.rs:2067)
+==7202==    by 0x125292: mp4parse::read_stsd (lib.rs:2155)
+==7202==    by 0x113A5F: read_stbl&lt;mp4parse::BMFFBox&lt;mp4parse::BMFFBox&lt;mp4parse::BMFFBox&lt;mp4parse::BMFFBox&lt;std::fs::File&gt;&gt;&gt;&gt;&gt; (lib.rs:965)
+==7202==    by 0x113A5F: mp4parse::read_minf (lib.rs:952)
+==7202==    by 0x119DC2: read_mdia&lt;mp4parse::BMFFBox&lt;mp4parse::BMFFBox&lt;std::fs::File&gt;&gt;&gt; (lib.rs:940)
+==7202==    by 0x119DC2: read_trak&lt;mp4parse::BMFFBox&lt;std::fs::File&gt;&gt; (lib.rs:859)
+==7202==    by 0x119DC2: mp4parse::read_moov (lib.rs:763)
+==7202==    by 0x127577: read_mp4&lt;std::fs::File&gt; (lib.rs:718)
+==7202==    by 0x127577: mp4ParseCaller::main (main.rs:16)
+...
+==7202==  Uninitialised value was created by a stack allocation
+==7202==    at 0x11ECDA: mp4parse::read_stsd (lib.rs:2144)
+				</code></pre>
 				</section>
 
 				<section>
